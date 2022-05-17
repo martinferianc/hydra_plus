@@ -127,3 +127,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+experiments/**/eeg-*/*
+experiments/**/cifar-*/*
+experiments/**/spiral-*/*
+experiments/**/regress-*/*
+experiments/**/cifar-*
+experiments/**/cifar10-*
+experiments/**/svhn-*
+experiments/**/cifar100-*
+experiments/data/*
