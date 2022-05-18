@@ -49,7 +49,7 @@ pip3 install -r requirements.txt
 
 ### Notes 
 
-1. Note that, you will see that the code mentions tails, but heads are mentioned in the paper. This is because we were conceptually experimenting with different ideas in the code, however, in the end we went with the "heads" concept.** The code works as it is and it enables us to replicate the results and hence we did not want to change it and somehow break it.
+1. Note that, you will see that the code mentions tails, but heads are mentioned in the paper. This is because we were conceptually experimenting with different ideas in the code, however, in the end we went with the "heads" concept. The code works as it is and it enables us to replicate the results and hence we did not want to change it and somehow break it.
 
 2. The [KL divergence for the classification](https://github.com/martinferianc/hydra_plus/blob/main/kd/training/losses.py#L5) is not exactly the same as in the paper. Again this one has been used during the experimentation and we actually found out that even though, logically, the gradients should be the same after omitting the log teacher term (assuming it as a constant) they are not the same on a GPU! If run on a CPU, the gradients with or without the constant term are the same. No idea why this is happening. The "right" version would simply be: `torch.sum(p * (- torch.log(q+1e-8)), dim=-1).mean()`.
 
