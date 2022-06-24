@@ -5,6 +5,7 @@ by Martin Ferianc (martin.ferianc.19@ucl.ac.uk) and Miguel Rodrigues.
 This repository presents simple regularisation that can be applied to train multi-headed models for knowledge distillation. The regularisation is based on the idea: to minimise the similarity between the heads through minimising their cosine similarity applied to their weights.
 
 The paper can be found at: [https://arxiv.org/abs/2205.09526](https://arxiv.org/abs/2205.09526)
+The poster is at [here](./poster.pdf)
 
 - [Simple Regularisation for Uncertainty-Aware Knowledge Distillation](#simple-regularisation-for-uncertainty-aware-knowledge-distillation)
   - [Abstract](#abstract)
