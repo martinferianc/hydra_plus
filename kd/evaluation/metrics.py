@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 
 METRICS_MAPPING = {
     "error": "Error [%]",
@@ -116,28 +117,22 @@ class Metric():
 class ClassificationMetric(Metric):
     def __init__(self, writer, output_size):
         super(ClassificationMetric, self).__init__(writer, output_size)
-        self.confusion_matrix = torch.zeros((self.output_size, self.output_size))
         
         self.entropy = AverageMeter()
-        self.ece = AverageMeter()
         self.nll = AverageMeter()
 
-        self.metrics += [self.nll, self.error, self.entropy, self.ece, self.f1]
-        self.metric_labels += ["nll", "error", "entropy", "ece", "f1"]
+        self.metrics += [self.nll, self.error, self.entropy, self.ece]
+        self.metric_labels += ["nll", "error", "entropy", "ece"]
+        
+        self.outputs = []
+        self.targets = []
 
-    @staticmethod
-    def _get_predictions(output):
-        bs, _ = output.size()
-        tensor = output.data
-        _, indices = tensor.max(1)
-        indices = indices.view(bs, 1)
-        return indices
-
-    @staticmethod
-    def _ec_error(output, target):
-        _ece = 0.0
-        confidences, predictions = torch.max(output, 1)
-        accuracies = predictions.eq(target)
+    def ece(self):
+        ece = 0.0
+        outputs = torch.cat(self.outputs, dim=0)
+        targets = torch.cat(self.targets, dim=0)
+        confidences, predictions = torch.max(outputs, 1)
+        accuracies = predictions.eq(targets)
 
         bin_boundaries = torch.linspace(0, 1, 10 + 1)
         bin_lowers = bin_boundaries[:-1]
@@ -150,10 +145,16 @@ class ClassificationMetric(Metric):
             if prop_in_bin.item() > 0:
                 accuracy_in_bin = accuracies[in_bin].float().mean()
                 avg_confidence_in_bin = confidences[in_bin].mean()
-                _ece += torch.abs(avg_confidence_in_bin -
+                ece += torch.abs(avg_confidence_in_bin -
                                     accuracy_in_bin) * prop_in_bin
-        _ece = _ece if isinstance(_ece, float) else _ece.item()
-        return _ece
+        ece = ece if isinstance(ece, float) else ece.item()
+        return ece * 100
+    
+    def error(self):
+        outputs = torch.cat(self.outputs, dim=0)
+        targets = torch.cat(self.targets, dim=0)
+        predictions = torch.argmax(outputs, dim=1)
+        return 1.0 - predictions.eq(targets).float().mean()
 
     @torch.no_grad()
     def update(self, output, target, loss=0.0, teacher_loss_mean = 0.0, teacher_loss_individual = 0.0, student_loss = 0.0, kl = 0.0, distance = 0.0, wd=0.0):
@@ -164,48 +165,23 @@ class ClassificationMetric(Metric):
         output = F.softmax(output, dim=2)
         output = output.mean(dim=1)
         bs, _ = output.size()
-        predictions = ClassificationMetric._get_predictions(output)
-        for lt, lp in zip(target, predictions):
-            if target.is_cuda or predictions.is_cuda and not self.confusion_matrix.is_cuda:
-                self.confusion_matrix = self.confusion_matrix.to(predictions.device)
-            self.confusion_matrix += self._fast_hist(lt.view(-1), lp.view(-1))
+        
+        self.outputs.append(output.detach())
+        self.targets.append(target.detach())
+        
         nll = F.nll_loss(torch.log(output+1e-8), target.long(), reduction='mean').item()
-        ece =  ClassificationMetric._ec_error(output.view(-1, self.output_size), target.view(-1))*100
         entropy = -(torch.sum(torch.log(output+1e-8)*output)/bs).item()
-
+        
         self.nll.update(nll, bs)
-        self.ece.update(ece, bs)
         self.entropy.update(entropy, bs)
-    
-    def _fast_hist(self, label_true, label_pred):
-        mask = (label_true >= 0) & (label_true < self.output_size)
-        return torch.bincount(
-            self.output_size * label_true[mask].long() + label_pred[mask],
-            minlength=self.output_size ** 2,
-        ).reshape(self.output_size, self.output_size)
-
-    def error(self):
-        hist = self.confusion_matrix
-        true_pos = torch.diag(hist) 
-        # The eta is added to avoid nans 
-        return (1.-(true_pos.sum() / (hist.sum()+1e-8)).item())*100
-    
-    def f1(self):
-        hist = self.confusion_matrix
-        if self.output_size == 2: # this is simply one-vs-one classification
-            precision = (torch.diag(hist) / (hist.sum(1) + 1e-8))[0]
-            recall = (torch.diag(hist) / (hist.sum(0) + 1e-8))[0]
-        else:
-            precision = (torch.diag(hist) / (hist.sum(1) + 1e-8)).mean()
-            recall = (torch.diag(hist) / (hist.sum(0) + 1e-8)).mean()
-        return (2*(precision*recall)/(precision+recall + 1e-8)).item()
             
     def reset(self):
         super().reset()
-        self.confusion_matrix = torch.zeros((self.output_size, self.output_size))
+        self.outputs = []
+        self.targets = []
 
     def get_key_metric(self):
-        return self.error()
+        return self.error
 
     def get_key_metric_label(self):
         return "ERROR"
@@ -214,12 +190,15 @@ class RegressionMetric(Metric):
     def __init__(self, writer):
         super(RegressionMetric, self).__init__(writer, None)
                 
-        self.rmse = AverageMeter()
         self.nll = AverageMeter()
         self.mae = AverageMeter()
 
         self.metrics += [self.rmse, self.nll, self.mae]
         self.metric_labels += ["rmse", "nll", "mae"]
+        
+
+    def rmse(self):
+        return math.sqrt(self.mse.avg)
 
     @torch.no_grad()
     def update(self, output, target, loss=0.0, teacher_loss_mean = 0.0, teacher_loss_individual = 0.0, student_loss = 0.0, kl = 0.0, distance = 0.0, wd=0.0):
@@ -236,11 +215,9 @@ class RegressionMetric(Metric):
         bs = mean.size(0)
         target = target.squeeze(1)
         
-        rmse = torch.sqrt(torch.mean((mean-target)**2)+1e-8).item()
         nll = F.gaussian_nll_loss(mean, target, var.clamp(min=1e-8), reduction='mean').item()
         mae = torch.mean(torch.abs(mean-target)).item()
 
-        self.rmse.update(rmse, bs)
         self.nll.update(nll, bs)
         self.mae.update(mae, bs)     
 
