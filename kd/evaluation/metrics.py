@@ -192,6 +192,7 @@ class RegressionMetric(Metric):
                 
         self.nll = AverageMeter()
         self.mae = AverageMeter()
+        self.mse = AverageMeter()
 
         self.metrics += [self.rmse, self.nll, self.mae]
         self.metric_labels += ["rmse", "nll", "mae"]
@@ -217,9 +218,11 @@ class RegressionMetric(Metric):
         
         nll = F.gaussian_nll_loss(mean, target, var.clamp(min=1e-8), reduction='mean').item()
         mae = torch.mean(torch.abs(mean-target)).item()
+        mse = torch.mean((mean-target)**2).item()
 
         self.nll.update(nll, bs)
-        self.mae.update(mae, bs)     
+        self.mae.update(mae, bs)
+        self.mse.update(mse, bs)     
 
     def get_key_metric(self):
         return self.nll.avg
